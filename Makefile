@@ -2,7 +2,7 @@ CC = gcc
 
 TARGET = pcap_reader
 SOURCES = main.c
-CFLAGS :=
+CFLAGS := -Wall -O2
 
 # Default target
 all: $(TARGET)
