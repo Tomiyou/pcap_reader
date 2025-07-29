@@ -26,7 +26,45 @@
 // impact the decision how to tune the ringbuffer.
 
 static void print_help(void) {
-    printf("Usage: pcap_reader --jobs 4 --help $INPUT_PCAP\n");
+    printf("Usage: pcap_reader --threads 4 --help $INPUT_PCAP\n");
+}
+
+static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap_file) {
+    int i;
+
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--num_threads") == 0) {
+            char *endptr = NULL;
+
+            // Parse next argument as thread count
+            i += 1;
+            if (i >= argc) {
+                return -EINVAL;
+            }
+
+            *num_threads = strtol(argv[i], &endptr, 10);
+            if (endptr[0] != '\0') {
+                return -EINVAL;
+            }
+
+            // Catch negative numbers
+            if (num_threads < 0) {
+                return -EINVAL;
+            }
+        } else if (strcmp(argv[i], "--help") == 0) {
+            print_help();
+            exit(0);
+        } else {
+            // This arg is our input PCAP file, we only allow 1 input file
+            if (*pcap_file != NULL) {
+                return -EINVAL;
+            }
+
+            *pcap_file = argv[i];
+        }
+    }
+
+    return 0;
 }
 
 #define IP_HDRLEN   20
@@ -142,11 +180,11 @@ static int ringbuffer_read(struct ringbuffer *r, unsigned char *data, size_t siz
 }
 
 int main (int argc, char **argv) {
-    long jobs = 1;
+    long num_threads = 1;
     char *pcap_file = NULL;
     pcap_t *handle = NULL;
     char errbuf[PCAP_ERRBUF_SIZE];
-    int i;
+    int err;
 
     // We always need at least one argument - input pcap
     if (argc < 2) {
@@ -155,39 +193,10 @@ int main (int argc, char **argv) {
     }
 
     // Parse arguments
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--jobs") == 0) {
-            char *endptr = NULL;
-
-            // Parse next argument as thread count
-            i += 1;
-            if (i >= argc) {
-                print_help();
-                return -EINVAL;
-            }
-
-            jobs = strtol(argv[i], &endptr, 10);
-            if (endptr[0] != '\0') {
-                print_help();
-                return -EINVAL;
-            }
-
-            // Catch negative numbers
-            if (jobs < 0) {
-                print_help();
-                return -EINVAL;
-            }
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_help();
-            return 0;
-        } else {
-            // This arg is our input PCAP file, we only allow 1 input file
-            if (pcap_file != NULL) {
-                return -EINVAL;
-            }
-
-            pcap_file = argv[i];
-        }
+    err = parse_arguments(argc, argv, &num_threads, &pcap_file);
+    if (err) {
+        print_help();
+        return err;
     }
 
     if (pcap_file == NULL) {
