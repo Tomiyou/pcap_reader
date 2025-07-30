@@ -183,13 +183,13 @@ void *reader_routine(void *arg) {
         err = ringbuffer_read(ring, &pkt_hdr, buffer, bufsize);
         if (err == -ENOMEM) {
             // Allocate a larger buffer
-            printf("Allocating larger buffer\n");
             free(buffer);
             bufsize *= 2;
             buffer = malloc(bufsize);
             if (buffer == NULL) {
                 exit(-ENOMEM);
             }
+            continue;
         } else if (err) {
             break;
         }
