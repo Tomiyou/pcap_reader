@@ -37,7 +37,7 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
     int i;
 
     for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--num_threads") == 0) {
+        if (strcmp(argv[i], "--threads") == 0) {
             char *endptr = NULL;
 
             // Parse next argument as thread count
@@ -51,8 +51,8 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
                 return -EINVAL;
             }
 
-            // Catch negative numbers
-            if (num_threads < 0) {
+            // Catch invalid numbers
+            if (*num_threads < 1) {
                 return -EINVAL;
             }
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -74,10 +74,13 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
 #define IP_HDRLEN   20
 #define IPV6_HDRLEN   40
 
-static void read_packets(pcap_t *handle) {
+static int round_robin = 0;
+
+static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *rings) {
     struct pcap_pkthdr *pkt_hdr;
     const unsigned char *pkt_data;
     int datalink;
+    int i;
 
     datalink = pcap_datalink(handle);
     if (datalink != DLT_EN10MB) {
@@ -87,6 +90,7 @@ static void read_packets(pcap_t *handle) {
 
     while (pcap_next_ex(handle, &pkt_hdr, &pkt_data) == 1) {
         struct ether_header *eth_hdr;
+        struct ringbuffer *ring;
 
         // Check if packet is long enough for Ethernet header
         if (pkt_hdr->len < ETH_HLEN)
@@ -114,7 +118,34 @@ static void read_packets(pcap_t *handle) {
         } else {
             continue;
         }
+
+        ring = &rings[round_robin];
+        ringbuffer_write(ring, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
+
+        // TODO: Use hash instead of round robin
+        round_robin = (round_robin + 1) % num_threads;
     }
+
+    // Tell our workers we are done
+    for (i = 0; i < num_threads; i++) {
+        ringbuffer_close(&rings[i]);
+    }
+}
+
+void *reader_routine(void *arg) {
+    struct ringbuffer *ring = (struct ringbuffer *)arg;
+    struct pcap_pkthdr pkt_hdr;
+
+    while (ringbuffer_read(ring, (unsigned char *)&pkt_hdr, sizeof(pkt_hdr)) == 0) {
+        printf("received msg %u\n", pkt_hdr.len);
+    }
+
+    printf("Worker thread exiting\n");
+
+    // Cleanup
+    ringbuffer_destroy(ring);
+
+    return NULL;
 }
 
 int main (int argc, char **argv) {
@@ -122,7 +153,10 @@ int main (int argc, char **argv) {
     char *pcap_file = NULL;
     pcap_t *handle = NULL;
     char errbuf[PCAP_ERRBUF_SIZE];
+    pthread_t *threads;
+    struct ringbuffer *rings;
     int err;
+    int i;
 
     // We always need at least one argument - input pcap
     if (argc < 2) {
@@ -133,6 +167,7 @@ int main (int argc, char **argv) {
     // Parse arguments
     err = parse_arguments(argc, argv, &num_threads, &pcap_file);
     if (err) {
+        printf("AAAAA\n");
         print_help();
         return err;
     }
@@ -150,11 +185,39 @@ int main (int argc, char **argv) {
 
     printf("Opened PCAP file: %s\n", pcap_file);
 
+    rings = malloc(sizeof(*rings) * num_threads);
+    if (rings == NULL) {
+        return -ENOMEM;
+    }
+
+    // Spawn worker threads
+    threads = malloc(sizeof(*threads) * num_threads);
+    if (threads == NULL) {
+        return -ENOMEM;
+    }
+    for (i = 0; i < num_threads; i++) {
+        ringbuffer_init(&rings[i], 1600);
+
+        err = pthread_create(&threads[i], NULL, &reader_routine, (void *)&rings[i]);
+        if (err) {
+            return err;
+        }
+    }
+
     // Read packets
-    read_packets(handle);
+    read_packets(handle, num_threads, rings);
+
+    // Wait for threads
+    for (i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    free(threads);
+
+    printf("All threads finished, exiting\n");
 
     // Cleanup
     pcap_close(handle);
+    free(rings);
 
     return 0;
 }
