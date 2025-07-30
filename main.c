@@ -5,11 +5,13 @@
 #include <string.h>
 
 #include <net/ethernet.h>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <linux/ipv6.h>
 
 #include <pthread.h>
 
+#include "murmurhash.h"
 #include "ringbuffer.h"
 
 // The fastest data structure (since it only needs simple synchronization) for
@@ -71,10 +73,11 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
     return 0;
 }
 
-#define IP_HDRLEN   20
-#define IPV6_HDRLEN   40
-
-static int round_robin = 0;
+#define SEED            4096
+#define IP_ADDR_LEN     4
+#define IP_HDR_LEN      20
+#define IPV6_ADDR_LEN   16
+#define IPV6_HDR_LEN    40
 
 static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *rings) {
     struct pcap_pkthdr *pkt_hdr;
@@ -91,6 +94,7 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
     while (pcap_next_ex(handle, &pkt_hdr, &pkt_data) == 1) {
         struct ether_header *eth_hdr;
         struct ringbuffer *ring;
+        uint32_t hash;
 
         // Check if packet is long enough for Ethernet header
         if (pkt_hdr->len < ETH_HLEN)
@@ -101,29 +105,34 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
         // We only care about IPv4 and IPv6 packets
         if (eth_hdr->ether_type == htons(ETHERTYPE_IP)) {
             struct iphdr *ip_hdr;
+            char tuple[IP_ADDR_LEN * 2];
 
             // Check if the remaining length is enough for IPv4 header
-            if (pkt_hdr->len < (ETH_HLEN + IP_HDRLEN))
+            if (pkt_hdr->len < (ETH_HLEN + IP_HDR_LEN))
                 continue;
 
             ip_hdr = (struct iphdr *)(pkt_data + ETH_HLEN);
+            memcpy(tuple, &ip_hdr->saddr, IP_ADDR_LEN);
+            memcpy(tuple + IP_ADDR_LEN, &ip_hdr->daddr, IP_ADDR_LEN);
+            hash = murmurhash(tuple, sizeof(tuple), SEED);
         } else if (eth_hdr->ether_type == htons(ETHERTYPE_IPV6)) {
             struct ipv6hdr *ipv6_hdr;
+            char tuple[IPV6_ADDR_LEN * 2];
 
             // Check if the remaining length is enough for IPv6 header
-            if (pkt_hdr->len < (ETH_HLEN + IPV6_HDRLEN))
+            if (pkt_hdr->len < (ETH_HLEN + IPV6_HDR_LEN))
                 continue;
 
             ipv6_hdr = (struct ipv6hdr *)(pkt_data + ETH_HLEN);
+            memcpy(tuple, ipv6_hdr->saddr.s6_addr32, IPV6_ADDR_LEN);
+            memcpy(tuple + IPV6_ADDR_LEN, ipv6_hdr->daddr.s6_addr32, IPV6_ADDR_LEN);
+            hash = murmurhash(tuple, sizeof(tuple), SEED);
         } else {
             continue;
         }
 
-        ring = &rings[round_robin];
+        ring = &rings[hash % num_threads];
         ringbuffer_write(ring, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
-
-        // TODO: Use hash instead of round robin
-        round_robin = (round_robin + 1) % num_threads;
     }
 
     // Tell our workers we are done
