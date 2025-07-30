@@ -132,18 +132,28 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
     }
 }
 
+struct worker_data {
+    int id;
+    struct ringbuffer *ring;
+    unsigned long *results;
+};
+
 void *reader_routine(void *arg) {
-    struct ringbuffer *ring = (struct ringbuffer *)arg;
+    struct worker_data *data = (struct worker_data *)arg;
+    struct ringbuffer *ring = data->ring;
     struct pcap_pkthdr pkt_hdr;
 
+    long bytes = 0;
     while (ringbuffer_read(ring, (unsigned char *)&pkt_hdr, sizeof(pkt_hdr)) == 0) {
-        printf("received msg %u\n", pkt_hdr.len);
+        bytes += pkt_hdr.len;
     }
 
-    printf("Worker thread exiting\n");
+    // Save the results
+    data->results[data->id] = bytes;
 
     // Cleanup
     ringbuffer_destroy(ring);
+    free(data);
 
     return NULL;
 }
@@ -155,6 +165,8 @@ int main (int argc, char **argv) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pthread_t *threads;
     struct ringbuffer *rings;
+    unsigned long *results;
+    unsigned long total_bytes;
     int err;
     int i;
 
@@ -167,7 +179,6 @@ int main (int argc, char **argv) {
     // Parse arguments
     err = parse_arguments(argc, argv, &num_threads, &pcap_file);
     if (err) {
-        printf("AAAAA\n");
         print_help();
         return err;
     }
@@ -185,20 +196,33 @@ int main (int argc, char **argv) {
 
     printf("Opened PCAP file: %s\n", pcap_file);
 
+    // Allocate ringbuffers (owned by worker thread)
     rings = malloc(sizeof(*rings) * num_threads);
     if (rings == NULL) {
         return -ENOMEM;
     }
 
-    // Spawn worker threads
+    // Allocate array to store results, no need for locking, since
+    // each thread gets its own variable (owned by main thread)
+    results = calloc(num_threads, sizeof(*results));
+    if (rings == NULL) {
+        return -ENOMEM;
+    }
+
+    // Spawn worker threads (owned by main thread)
     threads = malloc(sizeof(*threads) * num_threads);
     if (threads == NULL) {
         return -ENOMEM;
     }
     for (i = 0; i < num_threads; i++) {
-        ringbuffer_init(&rings[i], 1600);
+        struct worker_data *data = malloc(sizeof(struct worker_data));
+        data->id = i;
+        data->results = results;
 
-        err = pthread_create(&threads[i], NULL, &reader_routine, (void *)&rings[i]);
+        ringbuffer_init(&rings[i], 1600);
+        data->ring = &rings[i];
+
+        err = pthread_create(&threads[i], NULL, &reader_routine, (void *)data);
         if (err) {
             return err;
         }
@@ -213,11 +237,16 @@ int main (int argc, char **argv) {
     }
     free(threads);
 
-    printf("All threads finished, exiting\n");
+    total_bytes = 0;
+    for (i = 0; i < num_threads; i++) {
+        total_bytes += results[i];
+    }
+    printf("Total bytes in PCAP: %lu\n", total_bytes);
 
     // Cleanup
     pcap_close(handle);
     free(rings);
+    free(results);
 
     return 0;
 }
