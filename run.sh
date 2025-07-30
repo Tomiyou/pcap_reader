@@ -1,6 +1,7 @@
 #!/bin/bash
 
 DEV_IMAGE="pcap_reader_builder"
+RELEASE_IMAGE="pcap_reader"
 
 case "$1" in
   dev)
@@ -12,7 +13,22 @@ case "$1" in
     docker run -it --rm -v "$PWD":/mnt/pcap_reader "$DEV_IMAGE"
     ;;
   release)
-    # TODO
+    # Build release image
+    docker build --target release -t "$RELEASE_IMAGE" .
+    ;;
+  test)
+    # Test docker image
+    if [ -z "$2" ]; then
+      echo "Please provide a test file: $0 $1 test.pcap"
+      exit 1
+    fi
+    # Make path absolute if needed
+    TEST_FILE="$(basename $2)"
+    HOST_PATH="$2"
+    if [[ $HOST_PATH != /* ]]; then
+      HOST_PATH="$PWD/$HOST_PATH"
+    fi
+    docker run --rm -v "$HOST_PATH:/app/$TEST_FILE" pcap_reader "$TEST_FILE"
     ;;
   *)
     echo "Unknown argument: $1"

@@ -16,9 +16,12 @@ ENTRYPOINT [ "/bin/bash" ]
 # Runtime environment
 FROM debian:bookworm AS release
 
-RUN apt install libpcap
+RUN apt-get update -y
+RUN apt install libpcap0.8 -y
 
-COPY build/pcap_reader /app/pcap_reader
+# Copy binary to image
+WORKDIR /app
+COPY pcap_reader /app/pcap_reader
 RUN chmod +x /app/pcap_reader
 
 ENTRYPOINT ["/app/pcap_reader"]
