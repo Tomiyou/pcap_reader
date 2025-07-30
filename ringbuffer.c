@@ -1,8 +1,20 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <pcap/pcap.h>
 
 #include "ringbuffer.h"
+
+// It is possible to implement ringbuffer with contiguous virtual
+// pages mapped that point to the same underlying buffer. This makes
+// writing and fetching data from ringbuffer extremely simple, but
+// I intentionally avoided it since some consider it a hack.
+// If that implementation was used, it would be possible to avoid
+// copying memory back from ringbuffer to thread, but memcpy()
+// should be plenty fast (due to cache locality) and once you copy
+// data back to thread, ringbuffer mutex can be released, meaning
+// main thread can access ringbuffer while worker thread is
+// processing the current packet.
 
 static inline size_t min(size_t a, size_t b) {
     return (a < b) ? a : b;
@@ -30,6 +42,17 @@ void ringbuffer_destroy(struct ringbuffer *r) {
     free(r->buffer);
 }
 
+static inline void write(struct ringbuffer *r, unsigned char *data, size_t size) {
+    // If write does not wrap, second memcpy() does nothing
+    size_t wrap = min(size, r->buffer_size - r->tail);
+    memcpy(r->buffer + r->tail, data, wrap);
+    memcpy(r->buffer, data + wrap, size - wrap);
+
+    // Account for written memory
+    r->tail = (r->tail + size) % r->buffer_size;
+    r->bytes_used += size;
+}
+
 int ringbuffer_write(struct ringbuffer *r, unsigned char *data, size_t size) {
     pthread_mutex_lock(&r->mutex);
 
@@ -47,14 +70,7 @@ int ringbuffer_write(struct ringbuffer *r, unsigned char *data, size_t size) {
         pthread_cond_wait(&r->not_full, &r->mutex);
     }
 
-    // If write does not wrap, second memcpy() does nothing
-    size_t wrap = min(size, r->buffer_size - r->tail);
-    memcpy(r->buffer + r->tail, data, wrap);
-    memcpy(r->buffer, data + wrap, size - wrap);
-
-    // Account for written memory
-    r->tail = (r->tail + size) % r->buffer_size;
-    r->bytes_used += size;
+    write(r, data, size);
     r->write_waiting = 0;
 
     // TODO: Only send not_empty signal if actually empty
@@ -63,6 +79,17 @@ int ringbuffer_write(struct ringbuffer *r, unsigned char *data, size_t size) {
     pthread_mutex_unlock(&r->mutex);
 
     return 0;
+}
+
+static inline void read(struct ringbuffer *r, unsigned char *data, size_t size) {
+    // If read does not wrap, second memcpy() does nothing
+    size_t wrap = min(size, r->buffer_size - r->head);
+    memcpy(data, r->buffer + r->head, wrap);
+    memcpy(data + wrap, r->buffer, size - wrap);
+
+    // Account for read memory
+    r->head = (r->head + size) % r->buffer_size;
+    r->bytes_used -= size;
 }
 
 int ringbuffer_read(struct ringbuffer *r, unsigned char *data, size_t size) {
@@ -79,14 +106,7 @@ int ringbuffer_read(struct ringbuffer *r, unsigned char *data, size_t size) {
         pthread_cond_wait(&r->not_empty, &r->mutex);
     }
 
-    // If read does not wrap, second memcpy() does nothing
-    size_t wrap = min(size, r->buffer_size - r->head);
-    memcpy(data, r->buffer + r->head, wrap);
-    memcpy(data + wrap, r->buffer, size - wrap);
-
-    // Account for read memory
-    r->head = (r->head + size) % r->buffer_size;
-    r->bytes_used -= size;
+    read(r, data, size);
 
     // Only trigger not_full if enough space has been freed
     if ((r->buffer_size - r->bytes_used) >= r->write_waiting) {

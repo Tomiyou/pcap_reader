@@ -133,6 +133,8 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
             continue;
         }
 
+        // Memory returned by libpcap is not thread safe so we need
+        // to copy it to our ringbuffer anyway.
         ring = &rings[hash % num_threads];
         ringbuffer_write(ring, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
     }
