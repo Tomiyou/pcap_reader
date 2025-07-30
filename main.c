@@ -97,7 +97,7 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
         uint32_t hash;
 
         // Check if packet is long enough for Ethernet header
-        if (pkt_hdr->len < ETH_HLEN)
+        if (pkt_hdr->caplen < ETH_HLEN)
             continue;
 
         eth_hdr = (struct ether_header *)pkt_data;
@@ -108,24 +108,26 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
             char tuple[IP_ADDR_LEN * 2];
 
             // Check if the remaining length is enough for IPv4 header
-            if (pkt_hdr->len < (ETH_HLEN + IP_HDR_LEN))
+            if (pkt_hdr->caplen < (ETH_HLEN + IP_HDR_LEN))
                 continue;
 
             ip_hdr = (struct iphdr *)(pkt_data + ETH_HLEN);
             memcpy(tuple, &ip_hdr->saddr, IP_ADDR_LEN);
             memcpy(tuple + IP_ADDR_LEN, &ip_hdr->daddr, IP_ADDR_LEN);
+            // Hash doesn't care about network or host ordering
             hash = murmurhash(tuple, sizeof(tuple), SEED);
         } else if (eth_hdr->ether_type == htons(ETHERTYPE_IPV6)) {
             struct ipv6hdr *ipv6_hdr;
             char tuple[IPV6_ADDR_LEN * 2];
 
             // Check if the remaining length is enough for IPv6 header
-            if (pkt_hdr->len < (ETH_HLEN + IPV6_HDR_LEN))
+            if (pkt_hdr->caplen < (ETH_HLEN + IPV6_HDR_LEN))
                 continue;
 
             ipv6_hdr = (struct ipv6hdr *)(pkt_data + ETH_HLEN);
             memcpy(tuple, ipv6_hdr->saddr.s6_addr32, IPV6_ADDR_LEN);
             memcpy(tuple + IPV6_ADDR_LEN, ipv6_hdr->daddr.s6_addr32, IPV6_ADDR_LEN);
+            // Hash doesn't care about network or host ordering
             hash = murmurhash(tuple, sizeof(tuple), SEED);
         } else {
             continue;
