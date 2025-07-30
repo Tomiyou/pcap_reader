@@ -11,7 +11,7 @@
 
 #include <pthread.h>
 
-#include "murmurhash.h"
+#include "murmurhash/murmurhash.h"
 #include "ringbuffer.h"
 
 // The fastest data structure (since it only needs simple synchronization) for
@@ -79,6 +79,38 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
 #define IPV6_ADDR_LEN   16
 #define IPV6_HDR_LEN    40
 
+static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const unsigned char *pkt_data, int *ip_version) {
+    struct ether_header *eth_hdr;
+
+    // Check if packet is long enough for Ethernet header
+    if (pkt_hdr->caplen < ETH_HLEN) {
+        printf("Skipping non-Ethernet packet\n");
+        return NULL;
+    }
+
+    eth_hdr = (struct ether_header *)pkt_data;
+
+    // We only care about IPv4 and IPv6 packets
+    if (eth_hdr->ether_type == htons(ETHERTYPE_IP)) {
+        // Check if the remaining length is enough for IPv4 header
+        if (pkt_hdr->caplen < (ETH_HLEN + IP_HDR_LEN))
+            return NULL;
+
+        *ip_version = 4;
+        return pkt_data + ETH_HLEN;
+    } else if (eth_hdr->ether_type == htons(ETHERTYPE_IPV6)) {
+        // Check if the remaining length is enough for IPv6 header
+        if (pkt_hdr->caplen < (ETH_HLEN + IPV6_HDR_LEN))
+            return NULL;
+
+        *ip_version = 6;
+        return pkt_data + ETH_HLEN;
+    } else {
+        printf("Skipping non-IPv4/6 packet\n");
+        return NULL;
+    }
+}
+
 static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *rings) {
     struct pcap_pkthdr *pkt_hdr;
     const unsigned char *pkt_data;
@@ -92,51 +124,30 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
     }
 
     while (pcap_next_ex(handle, &pkt_hdr, &pkt_data) == 1) {
-        struct ether_header *eth_hdr;
         struct ringbuffer *ring;
+        const void *inet_hdr;
+        int ip_version;
         uint32_t hash;
 
-        // Check if packet is long enough for Ethernet header
-        if (pkt_hdr->caplen < ETH_HLEN)
+        // Extract IPv4/6 header
+        inet_hdr = find_inet_hdr(pkt_hdr, pkt_data, &ip_version);
+        if (inet_hdr == NULL) {
             continue;
+        }
 
-        eth_hdr = (struct ether_header *)pkt_data;
-
-        // We only care about IPv4 and IPv6 packets
-        if (eth_hdr->ether_type == htons(ETHERTYPE_IP)) {
-            struct iphdr *ip_hdr;
-            char tuple[IP_ADDR_LEN * 2];
-
-            // Check if the remaining length is enough for IPv4 header
-            if (pkt_hdr->caplen < (ETH_HLEN + IP_HDR_LEN))
-                continue;
-
-            ip_hdr = (struct iphdr *)(pkt_data + ETH_HLEN);
-            memcpy(tuple, &ip_hdr->saddr, IP_ADDR_LEN);
-            memcpy(tuple + IP_ADDR_LEN, &ip_hdr->daddr, IP_ADDR_LEN);
-            // Hash doesn't care about network or host ordering
-            hash = murmurhash(tuple, sizeof(tuple), SEED);
-        } else if (eth_hdr->ether_type == htons(ETHERTYPE_IPV6)) {
-            struct ipv6hdr *ipv6_hdr;
-            char tuple[IPV6_ADDR_LEN * 2];
-
-            // Check if the remaining length is enough for IPv6 header
-            if (pkt_hdr->caplen < (ETH_HLEN + IPV6_HDR_LEN))
-                continue;
-
-            ipv6_hdr = (struct ipv6hdr *)(pkt_data + ETH_HLEN);
-            memcpy(tuple, ipv6_hdr->saddr.s6_addr32, IPV6_ADDR_LEN);
-            memcpy(tuple + IPV6_ADDR_LEN, ipv6_hdr->daddr.s6_addr32, IPV6_ADDR_LEN);
-            // Hash doesn't care about network or host ordering
-            hash = murmurhash(tuple, sizeof(tuple), SEED);
+        // src and dst IP are always packed together (daddr after saddr)
+        if (ip_version == 4) {
+            struct iphdr *ip_hdr = (struct iphdr *)inet_hdr;
+            hash = murmurhash((const char *)&ip_hdr->saddr, IP_ADDR_LEN * 2, SEED);
         } else {
-            continue;
+            struct ipv6hdr *ipv6_hdr = (struct ipv6hdr *)inet_hdr;
+            hash = murmurhash((const char *)&ipv6_hdr->saddr, IPV6_ADDR_LEN * 2, SEED);
         }
 
         // Memory returned by libpcap is not thread safe so we need
         // to copy it to our ringbuffer anyway.
         ring = &rings[hash % num_threads];
-        ringbuffer_write(ring, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
+        ringbuffer_write(ring, pkt_hdr, pkt_data);
     }
 
     // Tell our workers we are done
@@ -155,14 +166,52 @@ void *reader_routine(void *arg) {
     struct worker_data *data = (struct worker_data *)arg;
     struct ringbuffer *ring = data->ring;
     struct pcap_pkthdr pkt_hdr;
+    unsigned char *buffer;
+    size_t bufsize = 2048;
+    long ip_payload_bytes = 0;
 
-    long bytes = 0;
-    while (ringbuffer_read(ring, (unsigned char *)&pkt_hdr, sizeof(pkt_hdr)) == 0) {
-        bytes += pkt_hdr.len;
+    buffer = malloc(bufsize);
+    if (buffer == NULL) {
+        exit(-ENOMEM);
+    }
+
+    while (1) {
+        const void *inet_hdr;
+        int ip_version;
+        int err;
+
+        err = ringbuffer_read(ring, &pkt_hdr, buffer, bufsize);
+        if (err == -ENOMEM) {
+            // Allocate a larger buffer
+            printf("Allocating larger buffer\n");
+            free(buffer);
+            bufsize *= 2;
+            buffer = malloc(bufsize);
+            if (buffer == NULL) {
+                exit(-ENOMEM);
+            }
+        } else if (err) {
+            break;
+        }
+
+        // Find IPv4/6 header
+        inet_hdr = find_inet_hdr(&pkt_hdr, buffer, &ip_version);
+        if (inet_hdr == NULL) {
+            continue;
+        }
+
+        // Parse payload sizes
+        if (ip_version == 4) {
+            struct iphdr *ip_hdr = (struct iphdr *)inet_hdr;
+            ip_payload_bytes += ntohs(ip_hdr->tot_len) - (ip_hdr->ihl << 2);
+        } else {
+            struct ipv6hdr *ipv6_hdr = (struct ipv6hdr *)inet_hdr;
+            ip_payload_bytes += ntohs(ipv6_hdr->payload_len);
+        }
     }
 
     // Save the results
-    data->results[data->id] = bytes;
+    data->results[data->id] = ip_payload_bytes;
 
     // Cleanup
     ringbuffer_destroy(ring);
@@ -232,7 +281,7 @@ int main (int argc, char **argv) {
         data->id = i;
         data->results = results;
 
-        ringbuffer_init(&rings[i], 1600);
+        ringbuffer_init(&rings[i], 1700);
         data->ring = &rings[i];
 
         err = pthread_create(&threads[i], NULL, &reader_routine, (void *)data);
@@ -254,7 +303,7 @@ int main (int argc, char **argv) {
     for (i = 0; i < num_threads; i++) {
         total_bytes += results[i];
     }
-    printf("Total bytes in PCAP: %lu\n", total_bytes);
+    printf("Sum of IPv4/6 payload bytes: %lu\n", total_bytes);
 
     // Cleanup
     pcap_close(handle);

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 // TODO: Tweak this
-#define RING_BUF_SIZE 1504 * 50
+#define RING_BUF_SIZE 2^16
 
 struct ringbuffer {
     pthread_mutex_t mutex;
@@ -19,6 +19,6 @@ struct ringbuffer {
 
 int ringbuffer_init(struct ringbuffer *r, size_t size);
 void ringbuffer_destroy(struct ringbuffer *r);
-int ringbuffer_write(struct ringbuffer *r, unsigned char *data, size_t size);
-int ringbuffer_read(struct ringbuffer *r, unsigned char *data, size_t size);
+int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const unsigned char *data);
+int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, unsigned char *data, size_t bufsize);
 void ringbuffer_close(struct ringbuffer *r);
