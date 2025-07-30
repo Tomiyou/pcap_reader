@@ -10,8 +10,12 @@
 
 #include <pthread.h>
 
+#include "ringbuffer.h"
+
 // The fastest data structure (since it only needs simple synchronization) for
 // passing packets between main thread and worker threads is probably a ringbuffer.
+// A ringbuffer per IP-tuple also makes it easy to preserve packet ordering for
+// that IP-tuple.
 // Since the majority of internet packets have a MTU of 1500 bytes, a ringbuffer
 // large enough to contain multiple packets + PCAP metadata for each packet would
 // probably be ideal. It avoids malloc() for each packet and keeps cache locality.
@@ -111,72 +115,6 @@ static void read_packets(pcap_t *handle) {
             continue;
         }
     }
-}
-
-// TODO: Tweak this
-#define RING_BUF_SIZE 1504 * 50
-
-struct ringbuffer {
-    pthread_spinlock_t lock;
-    unsigned char *buffer;
-    size_t buffer_size;
-    size_t head;
-    size_t tail;
-    size_t bytes_used;
-    unsigned int pkt_count;
-};
-
-static inline size_t min(size_t a, size_t b) {
-    return (a < b) ? a : b;
-}
-
-static struct ringbuffer *ringbuffer_alloc(size_t size) {
-    struct ringbuffer *r = calloc(1, sizeof(struct ringbuffer));
-
-    // Initialize default values
-    pthread_spin_init(&r->lock, PTHREAD_PROCESS_PRIVATE);
-    r->buffer = malloc(size);
-    if (r->buffer == NULL) {
-        free(r);
-        return NULL;
-    }
-    r->buffer_size = size;
-
-    return r;
-}
-
-static int ringbuffer_write(struct ringbuffer *r, unsigned char *data, size_t size) {
-    // Check if there is enough space for a write
-    if ((r->buffer_size - r->bytes_used) < size)
-        return -1;
-
-    // If write does not wrap, second memcpy() does nothing
-    size_t wrap = min(size, r->buffer_size - r->tail);
-    memcpy(r->buffer + r->tail, data, wrap);
-    memcpy(r->buffer, data + wrap, size - wrap);
-
-    // Account for written memory
-    r->tail = (r->tail + size) % r->buffer_size;
-    r->bytes_used += size;
-
-    return 0;
-}
-
-static int ringbuffer_read(struct ringbuffer *r, unsigned char *data, size_t size) {
-    // Check if there is enough space for a read
-    if (r->bytes_used < size)
-        return -1;
-
-    // If read does not wrap, second memcpy() does nothing
-    size_t wrap = min(size, r->buffer_size - r->head);
-    memcpy(data, r->buffer + r->head, wrap);
-    memcpy(data + wrap, r->buffer, size - wrap);
-
-    // Account for read memory
-    r->head = (r->head + size) % r->buffer_size;
-    r->bytes_used -= size;
-
-    return 0;
 }
 
 int main (int argc, char **argv) {

@@ -1,7 +1,7 @@
 CC = gcc
 
 TARGET = pcap_reader
-SOURCES = main.c
+SOURCES = main.c ringbuffer.c
 CFLAGS := -Wall -O2
 LDFLAGS := -lpcap
 
