@@ -1,5 +1,4 @@
 pcap_reader
 .ccls-cache
 test.pcap
-all.pcap
 *.o
