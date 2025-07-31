@@ -68,10 +68,10 @@ struct vlan_header {
     uint16_t    vlan_proto;
 };
 
-static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const unsigned char *pkt_data, int *ip_version) {
+static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const uint8_t *pkt_data, int *ip_version) {
     struct ether_header *eth_hdr;
-    const unsigned char *tail = pkt_data + pkt_hdr->caplen;
-    unsigned short ether_type;
+    const uint8_t *tail = pkt_data + pkt_hdr->caplen;
+    uint16_t ether_type;
 
     // Check if packet is long enough for Ethernet header
     if ((tail - pkt_data) < ETH_HLEN) {
@@ -124,7 +124,7 @@ static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const unsig
 
 static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *rings) {
     struct pcap_pkthdr *pkt_hdr;
-    const unsigned char *pkt_data;
+    const uint8_t *pkt_data;
     int datalink;
     int i;
 
@@ -170,16 +170,16 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
 struct worker_data {
     int id;
     struct ringbuffer *ring;
-    unsigned long *results;
+    uint64_t *results;
 };
 
 void *reader_routine(void *arg) {
     struct worker_data *data = (struct worker_data *)arg;
     struct ringbuffer *ring = data->ring;
     struct pcap_pkthdr pkt_hdr;
-    unsigned char *buffer;
+    uint8_t *buffer;
     size_t bufsize = 2048;
-    long ip_payload_bytes = 0;
+    uint64_t ip_payload_bytes = 0;
 
     buffer = malloc(bufsize);
     if (buffer == NULL) {
@@ -238,8 +238,8 @@ int main (int argc, char **argv) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pthread_t *threads;
     struct ringbuffer *rings;
-    unsigned long *results;
-    unsigned long total_bytes;
+    uint64_t *results;
+    uint64_t total_bytes;
     int err;
     int i;
 

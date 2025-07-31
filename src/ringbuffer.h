@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 // TODO: Tweak this
@@ -8,7 +9,7 @@ struct ringbuffer {
     pthread_mutex_t mutex;
     pthread_cond_t not_empty;
     pthread_cond_t not_full;
-    unsigned char *buffer;
+    uint8_t *buffer;
     size_t buffer_size;
     size_t head;
     size_t tail;
@@ -19,6 +20,6 @@ struct ringbuffer {
 
 int ringbuffer_init(struct ringbuffer *r, size_t size);
 void ringbuffer_destroy(struct ringbuffer *r);
-int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const unsigned char *data);
-int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, unsigned char *data, size_t bufsize);
+int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const uint8_t *data);
+int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, uint8_t *data, size_t bufsize);
 void ringbuffer_close(struct ringbuffer *r);

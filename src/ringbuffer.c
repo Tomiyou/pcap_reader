@@ -49,7 +49,7 @@ void ringbuffer_destroy(struct ringbuffer *r) {
     free(r->buffer);
 }
 
-static inline void write(struct ringbuffer *r, const unsigned char *data, size_t size) {
+static inline void write(struct ringbuffer *r, const uint8_t *data, size_t size) {
     // If write does not wrap, second memcpy() does nothing
     size_t wrap = min(size, r->buffer_size - r->tail);
     memcpy(r->buffer + r->tail, data, wrap);
@@ -60,8 +60,8 @@ static inline void write(struct ringbuffer *r, const unsigned char *data, size_t
     r->bytes_used += size;
 }
 
-int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const unsigned char *data) {
-    unsigned int size = sizeof(*pkt_hdr) + pkt_hdr->caplen;
+int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const uint8_t *data) {
+    uint32_t size = sizeof(*pkt_hdr) + pkt_hdr->caplen;
 
     pthread_mutex_lock(&r->mutex);
 
@@ -80,7 +80,7 @@ int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const un
     }
 
     // Write both pcap_pkthdr and the packet itself
-    write(r, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
+    write(r, (uint8_t *)pkt_hdr, sizeof(*pkt_hdr));
     write(r, data, pkt_hdr->caplen);
     r->write_waiting = 0;
 
@@ -92,7 +92,7 @@ int ringbuffer_write(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, const un
     return 0;
 }
 
-static inline void read(struct ringbuffer *r, unsigned char *data, size_t size) {
+static inline void read(struct ringbuffer *r, uint8_t *data, size_t size) {
     // If read does not wrap, second memcpy() does nothing
     size_t wrap = min(size, r->buffer_size - r->head);
     memcpy(data, r->buffer + r->head, wrap);
@@ -103,7 +103,7 @@ static inline void read(struct ringbuffer *r, unsigned char *data, size_t size) 
     r->bytes_used -= size;
 }
 
-int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, unsigned char *data, size_t bufsize) {
+int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, uint8_t *data, size_t bufsize) {
     pthread_mutex_lock(&r->mutex);
 
     // Check if there is enough space for a read
@@ -117,7 +117,7 @@ int ringbuffer_read(struct ringbuffer *r, struct pcap_pkthdr *pkt_hdr, unsigned 
         pthread_cond_wait(&r->not_empty, &r->mutex);
     }
 
-    read(r, (unsigned char *)pkt_hdr, sizeof(*pkt_hdr));
+    read(r, (uint8_t *)pkt_hdr, sizeof(*pkt_hdr));
     // If the next packet is too large for the given buffer,
     // undo read and let caller know
     if ((sizeof(*pkt_hdr) + pkt_hdr->caplen) > bufsize) {
