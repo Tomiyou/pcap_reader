@@ -19,18 +19,15 @@ static void print_help(void) {
 }
 
 static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap_file) {
-    int i;
-
-    for (i = 1; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--threads") == 0) {
-            char *endptr = NULL;
-
             // Parse next argument as thread count
             i += 1;
             if (i >= argc) {
                 return -EINVAL;
             }
 
+            char *endptr = NULL;
             *num_threads = strtol(argv[i], &endptr, 10);
             if (endptr[0] != '\0') {
                 return -EINVAL;
@@ -69,9 +66,7 @@ struct vlan_header {
 };
 
 static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const uint8_t *pkt_data, int *ip_version) {
-    struct ether_header *eth_hdr;
     const uint8_t *tail = pkt_data + pkt_hdr->caplen;
-    uint16_t ether_type;
 
     // Check if packet is long enough for Ethernet header
     if ((tail - pkt_data) < ETH_HLEN) {
@@ -79,20 +74,18 @@ static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const uint8
         return NULL;
     }
 
-    eth_hdr = (struct ether_header *)pkt_data;
+    struct ether_header *eth_hdr = (struct ether_header *)pkt_data;
     pkt_data += ETH_HLEN;
-    ether_type = eth_hdr->ether_type;
+    uint16_t ether_type = eth_hdr->ether_type;
 
     // Handle VLAN tag
     if (eth_hdr->ether_type == htons(ETHERTYPE_VLAN)) {
-        struct vlan_header *vlan_hdr;
-
         if ((tail - pkt_data) < VLAN_HLEN) {
             printf("Not enough space for VLAN header\n");
             return NULL;
         }
 
-        vlan_hdr = (struct vlan_header *)pkt_data;
+        struct vlan_header *vlan_hdr = (struct vlan_header *)pkt_data;
         pkt_data += VLAN_HLEN;
         ether_type = vlan_hdr->vlan_proto;
     }
@@ -123,29 +116,23 @@ static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const uint8
 }
 
 static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *rings) {
-    struct pcap_pkthdr *pkt_hdr;
-    const uint8_t *pkt_data;
-    int datalink;
-    int i;
-
-    datalink = pcap_datalink(handle);
+    int datalink = pcap_datalink(handle);
     if (datalink != DLT_EN10MB) {
         printf("Not reading non ethernet PCAP file\n");
         return;
     }
 
+    struct pcap_pkthdr *pkt_hdr;
+    const uint8_t *pkt_data;
     while (pcap_next_ex(handle, &pkt_hdr, &pkt_data) == 1) {
-        struct ringbuffer *ring;
-        const void *inet_hdr;
-        int ip_version;
-        uint32_t hash;
-
         // Extract IPv4/6 header
-        inet_hdr = find_inet_hdr(pkt_hdr, pkt_data, &ip_version);
+        int ip_version;
+        const void *inet_hdr = find_inet_hdr(pkt_hdr, pkt_data, &ip_version);
         if (inet_hdr == NULL) {
             continue;
         }
 
+        uint32_t hash;
         // src and dst IP are always packed together (daddr after saddr)
         if (ip_version == 4) {
             struct iphdr *ip_hdr = (struct iphdr *)inet_hdr;
@@ -157,12 +144,12 @@ static void read_packets(pcap_t *handle, long num_threads, struct ringbuffer *ri
 
         // Memory returned by libpcap is not thread safe so we need
         // to copy it to our ringbuffer anyway.
-        ring = &rings[hash % num_threads];
+        struct ringbuffer *ring = &rings[hash % num_threads];
         ringbuffer_write(ring, pkt_hdr, pkt_data);
     }
 
     // Tell our workers we are done
-    for (i = 0; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; i++) {
         ringbuffer_close(&rings[i]);
     }
 }
@@ -176,21 +163,19 @@ struct worker_data {
 void *reader_routine(void *arg) {
     struct worker_data *data = (struct worker_data *)arg;
     struct ringbuffer *ring = data->ring;
-    struct pcap_pkthdr pkt_hdr;
-    uint8_t *buffer;
-    size_t bufsize = 2048;
-    uint64_t ip_payload_bytes = 0;
 
-    buffer = malloc(bufsize);
+    size_t bufsize = 2048;
+    uint8_t *buffer = malloc(bufsize);
     if (buffer == NULL) {
         exit(-ENOMEM);
     }
 
+    uint64_t ip_payload_bytes = 0;
     while (1) {
-        const void *inet_hdr;
-        int ip_version;
+        struct pcap_pkthdr pkt_hdr;
         int err;
 
+        // Copy next packet and PCAP info from ringbuffer
         err = ringbuffer_read(ring, &pkt_hdr, buffer, bufsize);
         if (err == -ENOMEM) {
             // Allocate a larger buffer
@@ -206,7 +191,8 @@ void *reader_routine(void *arg) {
         }
 
         // Find IPv4/6 header
-        inet_hdr = find_inet_hdr(&pkt_hdr, buffer, &ip_version);
+        int ip_version;
+        const void *inet_hdr = find_inet_hdr(&pkt_hdr, buffer, &ip_version);
         if (inet_hdr == NULL) {
             continue;
         }
@@ -234,14 +220,7 @@ void *reader_routine(void *arg) {
 int main (int argc, char **argv) {
     long num_threads = 1;
     char *pcap_file = NULL;
-    pcap_t *handle = NULL;
-    char errbuf[PCAP_ERRBUF_SIZE];
-    pthread_t *threads;
-    struct ringbuffer *rings;
-    uint64_t *results;
-    uint64_t total_bytes;
     int err;
-    int i;
 
     // We always need at least one argument - input pcap
     if (argc < 2) {
@@ -261,7 +240,8 @@ int main (int argc, char **argv) {
         return -EINVAL;
     }
 
-    handle = pcap_open_offline(pcap_file, errbuf);
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *handle = pcap_open_offline(pcap_file, errbuf);
     if (handle == NULL) {
         printf("Unable to open PCAP file: %s\n", errbuf);
         return -EINVAL;
@@ -270,24 +250,24 @@ int main (int argc, char **argv) {
     printf("Opened PCAP file: %s\n", pcap_file);
 
     // Allocate ringbuffers (owned by worker thread)
-    rings = malloc(sizeof(*rings) * num_threads);
+    struct ringbuffer *rings = malloc(sizeof(*rings) * num_threads);
     if (rings == NULL) {
         return -ENOMEM;
     }
 
     // Allocate array to store results, no need for locking, since
     // each thread gets its own variable (owned by main thread)
-    results = calloc(num_threads, sizeof(*results));
+    uint64_t *results = calloc(num_threads, sizeof(*results));
     if (rings == NULL) {
         return -ENOMEM;
     }
 
     // Spawn worker threads (owned by main thread)
-    threads = malloc(sizeof(*threads) * num_threads);
+    pthread_t *threads = malloc(sizeof(*threads) * num_threads);
     if (threads == NULL) {
         return -ENOMEM;
     }
-    for (i = 0; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; i++) {
         struct worker_data *data = malloc(sizeof(struct worker_data));
         data->id = i;
         data->results = results;
@@ -305,13 +285,13 @@ int main (int argc, char **argv) {
     read_packets(handle, num_threads, rings);
 
     // Wait for threads
-    for (i = 0; i < num_threads; i++) {
+    for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
     free(threads);
 
-    total_bytes = 0;
-    for (i = 0; i < num_threads; i++) {
+    uint64_t total_bytes = 0;
+    for (int i = 0; i < num_threads; i++) {
         total_bytes += results[i];
     }
     printf("Sum of IPv4/6 payload bytes: %lu\n", total_bytes);
