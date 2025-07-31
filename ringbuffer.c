@@ -5,6 +5,13 @@
 
 #include "ringbuffer.h"
 
+// This ringbuffer is basically a channel (like the ones in Go lang)
+// that allows to store and fetch packets of variable size using
+// libpcap's struct pcap_pkthdr. Implementation is based on this
+// very simple implementation of channels in C, but I also added the
+// ability to notify worker threads when a channel is closed.
+// https://github.com/leo-aa88/channels-in-c
+
 // It is possible to implement ringbuffer with contiguous virtual
 // pages mapped that point to the same underlying buffer. This makes
 // writing and fetching data from ringbuffer extremely simple, but
