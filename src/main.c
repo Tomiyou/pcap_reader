@@ -164,7 +164,7 @@ void *reader_routine(void *arg) {
     struct worker_data *data = (struct worker_data *)arg;
     struct ringbuffer *ring = data->ring;
 
-    size_t bufsize = 2048;
+    size_t bufsize = 16384;
     uint8_t *buffer = malloc(bufsize);
     if (buffer == NULL) {
         exit(-ENOMEM);
