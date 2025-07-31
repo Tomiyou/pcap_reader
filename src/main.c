@@ -240,6 +240,8 @@ int main (int argc, char **argv) {
         return -EINVAL;
     }
 
+    printf("Using %ld threads\n", num_threads);
+
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle = pcap_open_offline(pcap_file, errbuf);
     if (handle == NULL) {
