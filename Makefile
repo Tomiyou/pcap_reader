@@ -8,7 +8,7 @@ LDFLAGS := -lpcap
 HASH_CFLAGS := -std=c99 -Wall -I./murmurhash -DMURMURHASH_WANTS_HTOLE32=1
 HASH_SRC := ./murmurhash/murmurhash
 
-SOURCES = main.c ringbuffer.c $(HASH_SRC).o
+SOURCES = src/main.c src/ringbuffer.c $(HASH_SRC).o
 
 # TODO: Check if dependencies are installed via pkgconfig
 

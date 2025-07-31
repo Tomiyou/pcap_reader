@@ -11,7 +11,7 @@
 
 #include <pthread.h>
 
-#include "murmurhash/murmurhash.h"
+#include "murmurhash.h"
 #include "ringbuffer.h"
 
 static void print_help(void) {
