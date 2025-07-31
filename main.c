@@ -57,39 +57,67 @@ static int parse_arguments(int argc, char **argv, long *num_threads, char **pcap
 }
 
 #define SEED            4096
+#define VLAN_HLEN       4
 #define IP_ADDR_LEN     4
 #define IP_HDR_LEN      20
 #define IPV6_ADDR_LEN   16
 #define IPV6_HDR_LEN    40
 
+struct vlan_header {
+    uint16_t    vlan_tci;
+    uint16_t    vlan_proto;
+};
+
 static inline const void *find_inet_hdr(struct pcap_pkthdr *pkt_hdr, const unsigned char *pkt_data, int *ip_version) {
     struct ether_header *eth_hdr;
+    const unsigned char *tail = pkt_data + pkt_hdr->caplen;
+    unsigned short ether_type;
 
     // Check if packet is long enough for Ethernet header
-    if (pkt_hdr->caplen < ETH_HLEN) {
+    if ((tail - pkt_data) < ETH_HLEN) {
         printf("Skipping non-Ethernet packet\n");
         return NULL;
     }
 
     eth_hdr = (struct ether_header *)pkt_data;
+    pkt_data += ETH_HLEN;
+    ether_type = eth_hdr->ether_type;
+
+    // Handle VLAN tag
+    if (eth_hdr->ether_type == htons(ETHERTYPE_VLAN)) {
+        struct vlan_header *vlan_hdr;
+
+        if ((tail - pkt_data) < VLAN_HLEN) {
+            printf("Not enough space for VLAN header\n");
+            return NULL;
+        }
+
+        vlan_hdr = (struct vlan_header *)pkt_data;
+        pkt_data += VLAN_HLEN;
+        ether_type = vlan_hdr->vlan_proto;
+    }
 
     // We only care about IPv4 and IPv6 packets
-    if (eth_hdr->ether_type == htons(ETHERTYPE_IP)) {
+    if (ether_type == htons(ETHERTYPE_IP)) {
         // Check if the remaining length is enough for IPv4 header
-        if (pkt_hdr->caplen < (ETH_HLEN + IP_HDR_LEN))
+        if ((tail - pkt_data) < IP_HDR_LEN) {
+            printf("Not enough space for IPv4 header\n");
             return NULL;
+        }
 
         *ip_version = 4;
-        return pkt_data + ETH_HLEN;
-    } else if (eth_hdr->ether_type == htons(ETHERTYPE_IPV6)) {
+        return pkt_data;
+    } else if (ether_type == htons(ETHERTYPE_IPV6)) {
         // Check if the remaining length is enough for IPv6 header
-        if (pkt_hdr->caplen < (ETH_HLEN + IPV6_HDR_LEN))
+        if ((tail - pkt_data) < IPV6_HDR_LEN) {
+            printf("Not enough space for IPv6 header\n");
             return NULL;
+        }
 
         *ip_version = 6;
-        return pkt_data + ETH_HLEN;
+        return pkt_data;
     } else {
-        printf("Skipping non-IPv4/6 packet\n");
+        printf("Skipping unknown ethertype: %hu\n", ether_type);
         return NULL;
     }
 }
