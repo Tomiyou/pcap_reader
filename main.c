@@ -14,23 +14,6 @@
 #include "murmurhash/murmurhash.h"
 #include "ringbuffer.h"
 
-// The fastest data structure (since it only needs simple synchronization) for
-// passing packets between main thread and worker threads is probably a ringbuffer.
-// A ringbuffer per IP-tuple also makes it easy to preserve packet ordering for
-// that IP-tuple.
-// Since the majority of internet packets have a MTU of 1500 bytes, a ringbuffer
-// large enough to contain multiple packets + PCAP metadata for each packet would
-// probably be ideal. It avoids malloc() for each packet and keeps cache locality.
-// Implementation could be:
-// - a ringbuffer with multiple memory pages pointing to the same underlying
-//   memory (which greatly simplifies memory access since it appears contiguous)
-// - copy packet from ringbuffer to a local memory block (making it contiguous)
-// - check if memcpy()ing a packet would wrap around ringbuffer and instead place
-//   copy the packet to the beginning of ringbuffer avoiding a wrap
-//
-// If working with mostly jumbo frames (64kB each) then that would definitely
-// impact the decision how to tune the ringbuffer.
-
 static void print_help(void) {
     printf("Usage: pcap_reader --threads 4 --help $INPUT_PCAP\n");
 }

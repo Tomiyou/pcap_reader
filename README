@@ -1,0 +1,47 @@
+# PCAP reader
+
+This is a C program that will parse an input .pcap file and output the total sum of IPv4/6 payloads of all packets in that .pcap file.
+
+## Requirements
+* Docker
+
+## Usage
+#### Create and run the development container
+```
+./run.sh dev
+# Inside container
+make
+./pcap_reader --help
+```
+
+#### Create release Docker image
+```
+./run.sh release
+```
+
+#### Test the release Docker image with a .pcap file
+```
+./run.sh test $INPUT_PCAP
+```
+
+## Extra thoughts
+The fastest data structure (since it only needs simple synchronization) for passing packets between main thread and worker threads is probably a ringbuffer - which is why I chose it for this implementation. As each IP-tuple always goes to the same ringbuffer, packet ordering is preserved for that IP-tuple.
+
+I assumed that main thread should copy entire packets to the worker threads through the ringbuffer. If we only packet headers were needed for processing,
+then this would make the whole implementation a lot simpler, since payloads can vary in sizes between a couple of bytes to kilobytes (jumbo frames).
+Since the majority of internet packets have a MTU of 1500 bytes, a ringbuffer large enough to contain multiple packets + PCAP metadata for each packet would
+probably be ideal. It avoids malloc() for each packet and keeps cache locality. Implementation could be:
+* a ringbuffer with multiple memory pages pointing to the same underlying
+  memory (which greatly simplifies memory access since it appears contiguous)
+  and process data directly from ringbuffer
+* copy packet from ringbuffer to a local memory block (making it contiguous)
+* check if memcpy()ing a packet would wrap around ringbuffer and instead place
+  copy the packet to the beginning of ringbuffer avoiding a wrap
+
+If working with mostly jumbo frames (64kB each) then that would definitely impact the decision how to tune the ringbuffer.
+
+#### Possible improvements
+* Ff a worker thread's ringbuffer fills up, main thread will also block, even though other threads might have plenty of space. Perhaps a backlog of some sorts would help with this issue.
+* Current Makefile is pretty simple and doesn't compile all of the .c files to .o files first. This means that gcc will recompile all .c files each time.
+* If we only needed packet headers without paylods for processing, this would make the whole implementation much simpler.
+* Check if dependencies are installed via pkgconfig in the Makefile. However, this is currently not a big deal, since we use Docker for development as well.

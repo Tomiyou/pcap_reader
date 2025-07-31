@@ -32,7 +32,7 @@ case "$1" in
     ;;
   *)
     echo "Unknown argument: $1"
-    echo "Usage: $0 {dev|release}"
+    echo "Usage: $0 {dev|release|test}"
     exit 1
     ;;
 esac

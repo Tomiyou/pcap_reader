@@ -10,6 +10,8 @@ HASH_SRC := ./murmurhash/murmurhash
 
 SOURCES = main.c ringbuffer.c $(HASH_SRC).o
 
+# TODO: Check if dependencies are installed via pkgconfig
+
 # Default target
 all: $(TARGET)
 
