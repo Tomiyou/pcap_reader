@@ -6,7 +6,13 @@ This is a C program that will parse an input .pcap file and output the total sum
 * Docker (with non-superuser permissions)
 
 ## Usage
+After cloning murmurhash submodule must be initialized for pcap_reader to compile:
+```
+git submodule update --remote --init
+```
+
 #### Create and run the development container
+
 This container is also used to compile release binary and all dependencies come preinstalled
 ```
 ./run.sh dev
