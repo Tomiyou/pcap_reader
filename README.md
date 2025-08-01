@@ -54,7 +54,7 @@ If working with mostly jumbo frames (64KB each) then that would definitely impac
 * Replacing mutex with spinlock might be worth it (since mutex can put thread to sleep).
 
 #### Logging
-* Implementing logging in a performance critical application would probably be implemented using asynchronous logging, meaning that rather than waiting for access to file/socket, it is far more efficient to write log requests to a queue and have a completely separate thread write to file/socket. This would reduce the amount of system calls greatly (no fighting for file/socket access) and allow low latency (much less locking).
+* Implementing logging in a performance critical application would probably be implemented using asynchronous logging, meaning that rather than waiting for access to file/socket, it is far more efficient to write log requests to a queue and have a completely separate thread write to file/socket. This would reduce the amount of system calls greatly (no fighting for file/socket access) and allow low latency (much less locking between threads).
 
 #### Collections
-
+* Not really sure what is meant by collections in this case, but I think data structures have been addressed above.
